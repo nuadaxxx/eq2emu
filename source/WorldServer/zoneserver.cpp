@@ -1008,9 +1008,9 @@ bool ZoneServer::CheckEnemyList(NPC* npc) {
 	vector<int32>::iterator faction_itr;
 	vector<int32> *spawns;
 	vector<int32>::iterator spawn_itr;
-	multimap<float, Spawn*> attack_spawns;
-	multimap<float, Spawn*> reverse_attack_spawns;	
-	multimap<float, Spawn*>::iterator itr;
+	map<float, Spawn*> attack_spawns;
+	map<float, Spawn*> reverse_attack_spawns;	
+	map<float, Spawn*>::iterator itr;
 	int32 faction_id = npc->GetFactionID();
 	float distance;
 
@@ -1030,10 +1030,8 @@ bool ZoneServer::CheckEnemyList(NPC* npc) {
 				for (spawn_itr = spawns->begin(); spawn_itr != spawns->end(); spawn_itr++) {
 					Spawn* spawn = GetSpawnByID(*spawn_itr);
 					if (spawn) {
-						if ((!npc->IsPrivateSpawn() || npc->AllowedAccess(spawn)) && spawn->IsWithinDistance(npc, npc->GetAggroRadius()) && npc->CheckLoS(spawn)) {
-							distance = spawn->GetDistance(npc);
-							attack_spawns.insert(pair<float, Spawn*>(distance, spawn));
-						}
+						if ((!npc->IsPrivateSpawn() || npc->AllowedAccess(spawn)) && (distance = spawn->GetDistance(npc)) <= npc->GetAggroRadius() && npc->CheckLoS(spawn))
+							attack_spawns[distance] = spawn;
 					}
 				}
 			}
@@ -1055,10 +1053,8 @@ bool ZoneServer::CheckEnemyList(NPC* npc) {
 				for (spawn_itr = spawns->begin(); spawn_itr != spawns->end(); spawn_itr++) {
 					Spawn* spawn = GetSpawnByID(*spawn_itr);
 					if (spawn) {
-						if ((!npc->IsPrivateSpawn() || npc->AllowedAccess(spawn)) && spawn->IsWithinDistance(npc, npc->GetAggroRadius()) && npc->CheckLoS(spawn)) {
-							distance = spawn->GetDistance(npc);
-							reverse_attack_spawns.insert(pair<float, Spawn*>(distance, spawn));
-						}
+						if ((!npc->IsPrivateSpawn() || npc->AllowedAccess(spawn)) && (distance = spawn->GetDistance(npc)) <= npc->GetAggroRadius() && npc->CheckLoS(spawn))
+							reverse_attack_spawns[distance] = spawn;
 					}
 				}
 			}
