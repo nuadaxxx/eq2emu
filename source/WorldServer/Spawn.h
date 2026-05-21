@@ -730,6 +730,9 @@ public:
 	float GetDistance(float x, float y, float z, bool ignore_y = false);
 	float GetDistance(Spawn* spawn, bool ignore_y = false, bool includeRadius=true);
 	float GetDistance(Spawn* spawn, float x1, float y1, float z1, bool includeRadius=true);
+	float GetDistanceSquared(float x1, float y1, float z1, float x2, float y2, float z2, bool ignore_y = false);
+	float GetDistanceSquared(Spawn* spawn, bool ignore_y = false);
+	bool IsWithinDistance(Spawn* spawn, float distance, bool ignore_y = false, bool includeRadius = true);
 	float CalculateRadius(Spawn* target);
 
 	int8 GetDifficulty(){
@@ -1538,6 +1541,14 @@ private:
 	// m_followTarget = spawn to follow around
 	int32			m_followTarget;
 	int32			m_followDistance;
+	// Combat follow repath guard: avoids stale target locations without recalculating path every movement tick.
+	int32			m_lastCombatFollowRepath;
+	float			m_lastCombatFollowTargetX;
+	float			m_lastCombatFollowTargetY;
+	float			m_lastCombatFollowTargetZ;
+	float			m_lastCombatFollowSelfX;
+	float			m_lastCombatFollowSelfY;
+	float			m_lastCombatFollowSelfZ;
 	bool            req_quests_private;
 	int16           req_quests_override;
 	bool            req_quests_continued_access;

@@ -116,6 +116,13 @@ Spawn::Spawn(){
 	last_movement_update = Timer::GetCurrentTime2();
 	forceMapCheck = false;
 	m_followDistance = 0;
+	m_lastCombatFollowRepath = 0;
+	m_lastCombatFollowTargetX = 0.0f;
+	m_lastCombatFollowTargetY = 0.0f;
+	m_lastCombatFollowTargetZ = 0.0f;
+	m_lastCombatFollowSelfX = 0.0f;
+	m_lastCombatFollowSelfY = 0.0f;
+	m_lastCombatFollowSelfZ = 0.0f;
 	MCommandMutex.SetName("Entity::MCommandMutex");
 	has_spawn_proximities = false;
 	pickup_item_id = 0;
@@ -1836,6 +1843,32 @@ float Spawn::GetDistance(float x1, float y1, float z1, float x2, float y2, float
 	return sqrt(x1*x1 + y1*y1 + z1*z1); 
 }
 
+float Spawn::GetDistanceSquared(float x1, float y1, float z1, float x2, float y2, float z2, bool ignore_y) {
+	float dx = x1 - x2;
+	float dy = ignore_y ? 0.0f : y1 - y2;
+	float dz = z1 - z2;
+	return (dx * dx) + (dy * dy) + (dz * dz);
+}
+
+float Spawn::GetDistanceSquared(Spawn* spawn, bool ignore_y) {
+	if (!spawn)
+		return 0.0f;
+
+	return GetDistanceSquared(GetX(), GetY(), GetZ(), spawn->GetX(), spawn->GetY(), spawn->GetZ(), ignore_y);
+}
+
+bool Spawn::IsWithinDistance(Spawn* spawn, float distance, bool ignore_y, bool includeRadius) {
+	if (!spawn)
+		return false;
+
+	float radius = includeRadius ? CalculateRadius(spawn) : 0.0f;
+	float effective_distance = distance + radius;
+	if (effective_distance < 0.0f)
+		effective_distance = 0.0f;
+
+	return GetDistanceSquared(spawn, ignore_y) <= (effective_distance * effective_distance);
+}
+
 float Spawn::GetDistance(float x, float y, float z, float radius, bool ignore_y) {
 	if (ignore_y)
 		return GetDistance(x, y, z, GetX(), y, GetZ()) - radius;
@@ -3216,29 +3249,59 @@ void Spawn::ProcessMovement(bool isSpawnListLocked){
 			}
 			MMovementLocations.unlock_shared();
 
+			float maxCombatRange = rule_manager.GetZoneRule(GetZoneID(), R_Combat, MaxCombatRange)->GetFloat();
 			float dist = GetDistance(followTarget, true);
-			if ((!EngagedInCombat() && m_followDistance > 0 && dist <= m_followDistance) || 
-				(dist <= rule_manager.GetZoneRule(GetZoneID(), R_Combat, MaxCombatRange)->GetFloat())) {
+			bool combatRepathDone = false;
+
+			// Combat follow can otherwise keep chasing an old path endpoint until the player sends a new
+			// movement update.  Repath at a low rate only when the target moved, the path is missing,
+			// or this spawn is not making progress.  The cheap squared-distance checks avoid adding
+			// extra sqrt work to the hot movement loop.
+			if (EngagedInCombat() && dist > maxCombatRange) {
+				int32 now = Timer::GetCurrentTime2();
+				float targetMovedSq = GetDistanceSquared(followTarget->GetX(), followTarget->GetY(), followTarget->GetZ(), m_lastCombatFollowTargetX, m_lastCombatFollowTargetY, m_lastCombatFollowTargetZ, true);
+				float selfMovedSq = GetDistanceSquared(GetX(), GetY(), GetZ(), m_lastCombatFollowSelfX, m_lastCombatFollowSelfY, m_lastCombatFollowSelfZ, true);
+				bool pathMissing = (loc == 0);
+				bool targetMoved = (m_lastCombatFollowRepath == 0 || targetMovedSq >= 2.25f);
+				bool notProgressing = (m_lastCombatFollowRepath > 0 && selfMovedSq <= 0.0625f);
+
+				if ((m_lastCombatFollowRepath == 0 || now >= (m_lastCombatFollowRepath + 500)) && (pathMissing || targetMoved || notProgressing)) {
+					ClearRunningLocations();
+					MoveToLocation(followTarget, maxCombatRange, false);
+					CalculateRunningLocation();
+					m_lastCombatFollowRepath = now;
+					m_lastCombatFollowTargetX = followTarget->GetX();
+					m_lastCombatFollowTargetY = followTarget->GetY();
+					m_lastCombatFollowTargetZ = followTarget->GetZ();
+					m_lastCombatFollowSelfX = GetX();
+					m_lastCombatFollowSelfY = GetY();
+					m_lastCombatFollowSelfZ = GetZ();
+					combatRepathDone = true;
+				}
+			}
+
+			if (!combatRepathDone && ((!EngagedInCombat() && m_followDistance > 0 && dist <= m_followDistance) || 
+				(dist <= maxCombatRange))) {
 				ClearRunningLocations();
 				CalculateRunningLocation(true);
 			}
-			else if (loc) {
+			else if (!combatRepathDone && loc) {
 				float distance = GetDistance(followTarget, loc->x, loc->y, loc->z);
 				if ( (!EngagedInCombat() && m_followDistance > 0 && distance > m_followDistance) ||
-					 ( EngagedInCombat() && distance > rule_manager.GetZoneRule(GetZoneID(), R_Combat, MaxCombatRange)->GetFloat())) {
+					 ( EngagedInCombat() && distance > maxCombatRange)) {
 					float self_distance = GetDistance(this, loc->x, loc->y, loc->z);
 					if(dist < distance || dist < self_distance) {
 						ClearRunningLocations();
 						CalculateRunningLocation(true);
 					}
 					else {
-						MoveToLocation(followTarget, rule_manager.GetZoneRule(GetZoneID(), R_Combat, MaxCombatRange)->GetFloat(), true, loc->mapped);
+						MoveToLocation(followTarget, maxCombatRange, true, loc->mapped);
 						CalculateRunningLocation();
 					}
 				}
 			}
-			else {
-				MoveToLocation(followTarget, rule_manager.GetZoneRule(GetZoneID(), R_Combat, MaxCombatRange)->GetFloat(), false);
+			else if (!combatRepathDone) {
+				MoveToLocation(followTarget, maxCombatRange, false);
 				CalculateRunningLocation();
 			}
 		}
@@ -4247,11 +4310,21 @@ void Spawn::RemoveSpawnAccess(Spawn* spawn) {
 
 void Spawn::SetFollowTarget(Spawn* spawn, int32 follow_distance) {
 	if (spawn && spawn != this) {
+		if (m_followTarget != spawn->GetID()) {
+			m_lastCombatFollowRepath = 0;
+			m_lastCombatFollowTargetX = spawn->GetX();
+			m_lastCombatFollowTargetY = spawn->GetY();
+			m_lastCombatFollowTargetZ = spawn->GetZ();
+			m_lastCombatFollowSelfX = GetX();
+			m_lastCombatFollowSelfY = GetY();
+			m_lastCombatFollowSelfZ = GetZ();
+		}
 		m_followTarget = spawn->GetID();
 		m_followDistance = follow_distance;
 	}
 	else {
 		m_followTarget = 0;
+		m_lastCombatFollowRepath = 0;
 		if (following)
 			following = false;
 		m_followDistance = 0;
