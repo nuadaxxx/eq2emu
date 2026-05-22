@@ -3521,6 +3521,29 @@ void Player::PrepareIncomingMovementPacket(int32 len, uchar* data, int16 version
 		SetPitch(180 + update->pitch);
 	}
 	
+	printf("[CAMERA_DEBUG][MOVEMENT] char=%s char_id=%u version=%u activity=%u grid=%u raw_pitch=%.6f server_pitch=%.6f direction1=%.6f direction2=%.6f heading_short1=%d heading_short2=%d x=%.6f y=%.6f z=%.6f speed=%.6f side_speed=%.6f vert_speed=%.6f speed_x=%.6f speed_y=%.6f speed_z=%.6f\n",
+		GetName(),
+		GetCharacterID(),
+		(unsigned int)version,
+		(unsigned int)activity,
+		(unsigned int)grid_id,
+		client_pitch,
+		GetPitch(),
+		direction1,
+		direction2,
+		(int)((sint16)(direction1 * 64)),
+		(int)((sint16)(direction2 * 64)),
+		x,
+		y,
+		z,
+		speed,
+		side_speed,
+		vert_speed,
+		x_speed,
+		y_speed,
+		z_speed);
+	fflush(stdout);
+	
 	SetHeading((sint16)(direction1 * 64), (sint16)(direction2 * 64));
 	
 	if (activity != last_movement_activity) {
