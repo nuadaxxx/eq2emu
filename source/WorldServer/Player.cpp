@@ -3529,17 +3529,42 @@ void Player::PrepareIncomingMovementPacket(int32 len, uchar* data, int16 version
 	float delta_y = y - server_y_before;
 	float delta_z = z - server_z_before;
 	float delta_pos = sqrtf((delta_x * delta_x) + (delta_y * delta_y) + (delta_z * delta_z));
-	float delta_heading = fabs(direction1 - server_heading_before);
-	if (delta_heading > 180.0f)
-		delta_heading = 360.0f - delta_heading;
+	float delta_heading_server = fabs(direction1 - server_heading_before);
+	if (delta_heading_server > 180.0f)
+		delta_heading_server = 360.0f - delta_heading_server;
 
+	static std::map<int32, float> camera_debug_v3_last_direction1;
+	static std::map<int32, uint32> camera_debug_v3_last_time;
+	static std::map<int32, float> camera_debug_v3_last_delta_signed;
+	int32 camera_debug_v3_char_id = GetCharacterID();
+	uint32 camera_debug_v3_now = Timer::GetCurrentTime2();
+	bool camera_debug_v3_has_last = camera_debug_v3_last_direction1.count(camera_debug_v3_char_id) > 0;
+	float camera_debug_v3_last_dir = camera_debug_v3_has_last ? camera_debug_v3_last_direction1[camera_debug_v3_char_id] : direction1;
+	uint32 camera_debug_v3_last_ms = camera_debug_v3_has_last ? camera_debug_v3_last_time[camera_debug_v3_char_id] : camera_debug_v3_now;
+	uint32 camera_debug_v3_delta_ms = camera_debug_v3_now >= camera_debug_v3_last_ms ? camera_debug_v3_now - camera_debug_v3_last_ms : 0;
+	float packet_delta_heading_signed = direction1 - camera_debug_v3_last_dir;
+	while (packet_delta_heading_signed > 180.0f)
+		packet_delta_heading_signed -= 360.0f;
+	while (packet_delta_heading_signed < -180.0f)
+		packet_delta_heading_signed += 360.0f;
+	float packet_delta_heading = fabs(packet_delta_heading_signed);
+	bool camera_debug_v3_has_last_delta = camera_debug_v3_last_delta_signed.count(camera_debug_v3_char_id) > 0;
+	float camera_debug_v3_last_delta = camera_debug_v3_has_last_delta ? camera_debug_v3_last_delta_signed[camera_debug_v3_char_id] : 0.0f;
 	bool zero_movement_packet = fabs(speed) < 0.001f && fabs(side_speed) < 0.001f && fabs(vert_speed) < 0.001f &&
 		fabs(x_speed) < 0.001f && fabs(y_speed) < 0.001f && fabs(z_speed) < 0.001f;
 	bool same_position_packet = delta_pos < 0.050f;
-	bool camera_heading_only_packet = zero_movement_packet && same_position_packet && !GetBoatSpawn() && !IsResurrecting();
-	bool camera_heading_snap_packet = camera_heading_only_packet && delta_heading > 25.0f;
+	bool camera_only_packet = zero_movement_packet && same_position_packet && !GetBoatSpawn() && !IsResurrecting();
+	bool fast_packet = camera_debug_v3_has_last && camera_debug_v3_delta_ms <= 100;
+	bool very_fast_packet = camera_debug_v3_has_last && camera_debug_v3_delta_ms <= 50;
+	bool large_packet_turn = packet_delta_heading > 75.0f;
+	bool extreme_packet_turn = packet_delta_heading > 120.0f;
+	bool direction_flip = camera_debug_v3_has_last_delta &&
+		((camera_debug_v3_last_delta > 25.0f && packet_delta_heading_signed < -25.0f) ||
+		(camera_debug_v3_last_delta < -25.0f && packet_delta_heading_signed > 25.0f));
+	bool hectic_candidate = camera_only_packet && fast_packet && (extreme_packet_turn || (large_packet_turn && direction_flip));
+	bool allow_candidate = camera_only_packet && !hectic_candidate;
 
-	printf("[CAMERA_DEBUG][MOVEMENT] char=%s char_id=%u version=%u activity=%u grid=%u raw_pitch=%.6f server_pitch=%.6f direction1=%.6f direction2=%.6f heading_short1=%d heading_short2=%d x=%.6f y=%.6f z=%.6f speed=%.6f side_speed=%.6f vert_speed=%.6f speed_x=%.6f speed_y=%.6f speed_z=%.6f server_x_before=%.6f server_y_before=%.6f server_z_before=%.6f server_heading_before=%.6f delta_x=%.6f delta_y=%.6f delta_z=%.6f delta_pos=%.6f delta_heading=%.6f zero_move=%u same_pos=%u camera_only=%u camera_snap=%u\n",
+	printf("[Camera_Debug_V3][MOVEMENT] char=%s char_id=%u version=%u activity=%u grid=%u raw_pitch=%.6f server_pitch=%.6f direction1=%.6f direction2=%.6f heading_short1=%d heading_short2=%d x=%.6f y=%.6f z=%.6f speed=%.6f side_speed=%.6f vert_speed=%.6f speed_x=%.6f speed_y=%.6f speed_z=%.6f server_x_before=%.6f server_y_before=%.6f server_z_before=%.6f server_heading_before=%.6f delta_x=%.6f delta_y=%.6f delta_z=%.6f delta_pos=%.6f delta_heading_server=%.6f last_packet_direction1=%.6f packet_delta_heading_signed=%.6f packet_delta_heading=%.6f delta_ms=%u zero_move=%u same_pos=%u camera_only=%u fast_packet=%u very_fast_packet=%u large_turn=%u extreme_turn=%u direction_flip=%u hectic_candidate=%u allow_candidate=%u\n",
 		GetName(),
 		GetCharacterID(),
 		(unsigned int)version,
@@ -3568,31 +3593,44 @@ void Player::PrepareIncomingMovementPacket(int32 len, uchar* data, int16 version
 		delta_y,
 		delta_z,
 		delta_pos,
-		delta_heading,
+		delta_heading_server,
+		camera_debug_v3_last_dir,
+		packet_delta_heading_signed,
+		packet_delta_heading,
+		(unsigned int)camera_debug_v3_delta_ms,
 		(unsigned int)zero_movement_packet,
 		(unsigned int)same_position_packet,
-		(unsigned int)camera_heading_only_packet,
-		(unsigned int)camera_heading_snap_packet);
+		(unsigned int)camera_only_packet,
+		(unsigned int)fast_packet,
+		(unsigned int)very_fast_packet,
+		(unsigned int)large_packet_turn,
+		(unsigned int)extreme_packet_turn,
+		(unsigned int)direction_flip,
+		(unsigned int)hectic_candidate,
+		(unsigned int)allow_candidate);
 	fflush(stdout);
 
-	if (camera_heading_snap_packet) {
-		printf("[CAMERA_FIX][SKIP_HEADING_SNAP] char=%s char_id=%u old_heading=%.6f packet_direction1=%.6f packet_direction2=%.6f delta_heading=%.6f delta_pos=%.6f x=%.6f y=%.6f z=%.6f\n",
+	if (hectic_candidate) {
+		printf("[Camera_Fix_V3][CANDIDATE_HECTIC_SWITCH_ONLY_NOT_BLOCKED] char=%s char_id=%u last_packet_direction1=%.6f packet_direction1=%.6f packet_direction2=%.6f packet_delta_heading_signed=%.6f packet_delta_heading=%.6f delta_ms=%u delta_pos=%.6f server_heading_before=%.6f\n",
 			GetName(),
 			GetCharacterID(),
-			server_heading_before,
+			camera_debug_v3_last_dir,
 			direction1,
 			direction2,
-			delta_heading,
+			packet_delta_heading_signed,
+			packet_delta_heading,
+			(unsigned int)camera_debug_v3_delta_ms,
 			delta_pos,
-			x,
-			y,
-			z);
+			server_heading_before);
 		fflush(stdout);
 	}
-	else {
-		SetHeading((sint16)(direction1 * 64), (sint16)(direction2 * 64));
-	}
 
+	camera_debug_v3_last_direction1[camera_debug_v3_char_id] = direction1;
+	camera_debug_v3_last_time[camera_debug_v3_char_id] = camera_debug_v3_now;
+	camera_debug_v3_last_delta_signed[camera_debug_v3_char_id] = packet_delta_heading_signed;
+	
+	SetHeading((sint16)(direction1 * 64), (sint16)(direction2 * 64));
+	
 	if (activity != last_movement_activity) {
 		switch(activity) {
 			case UPDATE_ACTIVITY_RUNNING:
@@ -3708,10 +3746,8 @@ void Player::PrepareIncomingMovementPacket(int32 len, uchar* data, int16 version
 			SetSpeedZ(z_speed);
 			SetSideSpeed(side_speed);
 			SetVertSpeed(vert_speed);
-			if (!camera_heading_snap_packet) {
-				SetClientHeading1(direction1);
-				SetClientHeading2(direction2);
-			}
+			SetClientHeading1(direction1);
+			SetClientHeading2(direction2);
 			SetClientPitch(client_pitch);
 			if(version > 373) {
 				pos_packet_speed = speed;
@@ -3723,10 +3759,8 @@ void Player::PrepareIncomingMovementPacket(int32 len, uchar* data, int16 version
 			SetSpeedZ(0.0f);
 			SetSideSpeed(0.0f);
 			SetVertSpeed(0.0f);
-			if (!camera_heading_snap_packet) {
-				SetClientHeading1(direction1);
-				SetClientHeading2(direction2);
-			}
+			SetClientHeading1(direction1);
+			SetClientHeading2(direction2);
 			SetClientPitch(client_pitch);
 			pos_packet_speed = 0;
 		}
